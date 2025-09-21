@@ -35,6 +35,14 @@ const (
 	StateInvalid
 )
 
+// TableRef provides safe table access with lifecycle management
+type TableRef struct {
+	table    *Table
+	refCount int32
+	isValid  bool
+	mutex    sync.RWMutex
+}
+
 // TableSpec represents enhanced table specification with schema management
 type TableSpec struct {
 	Name        string        `json:"name"`
@@ -164,7 +172,7 @@ func (t *Table) addColumnFromSpec(colSpec ColumnSpec) error {
 
 	// Generate column key if not provided
 	if colSpec.Key == 0 {
-		colSpec.Key = keys.GenerateColKey(colSpec.Type, colSpec.Nullable)
+		colSpec.Key = keys.GenerateColKeySimple(colSpec.Type, colSpec.Nullable)
 	}
 
 	// Validate column specification
@@ -227,11 +235,19 @@ func (t *Table) AddColumn(name string, dataType keys.DataType, nullable bool) (k
 	}
 
 	// Generate column key using allocator
-	ref, err := t.alloc.Alloc(8) // Allocate 8 bytes for column key
+	_, err := t.alloc.Alloc(8) // Allocate 8 bytes for column key
 	if err != nil {
 		return 0, fmt.Errorf("failed to allocate column key: %w", err)
 	}
-	colKey := keys.ColKey(ref)
+
+	// Create column attributes
+	attrs := keys.NewColumnAttrMask()
+	if nullable {
+		attrs.Set(keys.ColAttrNullable)
+	}
+
+	// Generate column key with proper attributes
+	colKey := keys.GenerateColKey(dataType, attrs)
 
 	// Create column specification
 	colSpec := &ColumnSpec{
@@ -532,14 +548,6 @@ func (t *Table) validateValue(colKey keys.ColKey, value interface{}) error {
 	}
 
 	return nil
-}
-
-// TableRef provides safe table access with lifecycle management
-type TableRef struct {
-	table    *Table
-	refCount int32
-	isValid  bool
-	mutex    sync.RWMutex
 }
 
 // Attach attaches the table to its parent group with lifecycle management
@@ -848,25 +856,32 @@ func (t *Table) AddColumnList(name string, elementType keys.DataType, nullable b
 		return 0, fmt.Errorf("column '%s' already exists", name)
 	}
 
-	// Generate new column key for list type
-	colKey := keys.GenerateColKey(keys.TypeList, nullable)
-
 	// Create column attributes with list flag
-	attrs := NewColumnAttributes(ColAttrList)
+	attrs := keys.NewColumnAttrMask()
+	attrs.Set(keys.ColAttrList)
 	if nullable {
-		attrs.SetAttribute(ColAttrNullable)
+		attrs.Set(keys.ColAttrNullable)
 	}
-	attrs.SetElementType(elementType)
+
+	// Generate new column key for list type using element type with list attributes
+	colKey := keys.GenerateColKey(elementType, attrs)
+
+	// Create table-level column attributes
+	tableAttrs := NewColumnAttributes(ColAttrList)
+	if nullable {
+		tableAttrs.SetAttribute(ColAttrNullable)
+	}
+	tableAttrs.SetElementType(elementType)
 
 	// Create column specification
 	colSpec := &ColumnSpec{
 		Name:        name,
-		Type:        keys.TypeList,
+		Type:        elementType, // Store element type, not collection type
 		ElementType: elementType,
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
-		Attributes:  attrs,
+		Attributes:  tableAttrs,
 	}
 
 	// Add to table
@@ -891,25 +906,32 @@ func (t *Table) AddColumnSet(name string, elementType keys.DataType, nullable bo
 		return 0, fmt.Errorf("column '%s' already exists", name)
 	}
 
-	// Generate new column key for set type
-	colKey := keys.GenerateColKey(keys.TypeSet, nullable)
-
 	// Create column attributes with set flag
-	attrs := NewColumnAttributes(ColAttrSet)
+	attrs := keys.NewColumnAttrMask()
+	attrs.Set(keys.ColAttrSet)
 	if nullable {
-		attrs.SetAttribute(ColAttrNullable)
+		attrs.Set(keys.ColAttrNullable)
 	}
-	attrs.SetElementType(elementType)
+
+	// Generate new column key for set type using element type with set attributes
+	colKey := keys.GenerateColKey(elementType, attrs)
+
+	// Create table-level column attributes
+	tableAttrs := NewColumnAttributes(ColAttrSet)
+	if nullable {
+		tableAttrs.SetAttribute(ColAttrNullable)
+	}
+	tableAttrs.SetElementType(elementType)
 
 	// Create column specification
 	colSpec := &ColumnSpec{
 		Name:        name,
-		Type:        keys.TypeSet,
+		Type:        elementType, // Store element type, not collection type
 		ElementType: elementType,
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
-		Attributes:  attrs,
+		Attributes:  tableAttrs,
 	}
 
 	// Add to table
@@ -934,27 +956,34 @@ func (t *Table) AddColumnDictionary(name string, keyType, valueType keys.DataTyp
 		return 0, fmt.Errorf("column '%s' already exists", name)
 	}
 
-	// Generate new column key for dictionary type
-	colKey := keys.GenerateColKey(keys.TypeDict, nullable)
-
 	// Create column attributes with dictionary flag
-	attrs := NewColumnAttributes(ColAttrDict)
+	attrs := keys.NewColumnAttrMask()
+	attrs.Set(keys.ColAttrDictionary)
 	if nullable {
-		attrs.SetAttribute(ColAttrNullable)
+		attrs.Set(keys.ColAttrNullable)
 	}
-	attrs.SetElementType(valueType)
-	attrs.SetKeyType(keyType)
+
+	// Generate new column key for dictionary type using value type with dictionary attributes
+	colKey := keys.GenerateColKey(valueType, attrs)
+
+	// Create table-level column attributes
+	tableAttrs := NewColumnAttributes(ColAttrDict)
+	if nullable {
+		tableAttrs.SetAttribute(ColAttrNullable)
+	}
+	tableAttrs.SetElementType(valueType)
+	tableAttrs.SetKeyType(keyType)
 
 	// Create column specification with both key and value types
 	colSpec := &ColumnSpec{
 		Name:        name,
-		Type:        keys.TypeDict,
+		Type:        valueType, // Store value type, not collection type
 		ElementType: valueType,
 		KeyType:     keyType,
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
-		Attributes:  attrs,
+		Attributes:  tableAttrs,
 	}
 
 	// Add to table
@@ -975,7 +1004,8 @@ func (t *Table) GetCollectionElementType(colKey keys.ColKey) (keys.DataType, err
 		return 0, fmt.Errorf("column not found")
 	}
 
-	if !keys.IsCollectionType(colSpec.Type) {
+	// Check if the column is a collection using ColKey attributes, not the stored Type
+	if !colKey.IsCollection() {
 		return 0, fmt.Errorf("column is not a collection type")
 	}
 
@@ -992,7 +1022,8 @@ func (t *Table) GetDictionaryKeyType(colKey keys.ColKey) (keys.DataType, error) 
 		return 0, fmt.Errorf("column not found")
 	}
 
-	if colSpec.Type != keys.TypeDict {
+	// Check if the column is a dictionary using ColKey attributes, not the stored Type
+	if !colKey.IsDictionary() {
 		return 0, fmt.Errorf("column is not a dictionary type")
 	}
 

@@ -44,7 +44,11 @@ func (t *Table) AddColumn(name string, dataType keys.DataType, nullable bool) (k
 	}
 
 	// Create column key
-	colKey := keys.NewColKey(dataType, t.nextColKey, nullable)
+	var attrs keys.ColumnAttrMask
+	if nullable {
+		attrs.Set(keys.ColAttrNullable)
+	}
+	colKey := keys.NewColKey(t.nextColKey, dataType, attrs, 0)
 	t.nextColKey++
 
 	// Add to table's column map

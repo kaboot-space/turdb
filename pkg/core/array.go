@@ -296,19 +296,24 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 	elementSize := a.getElementSize()
 	dataOffset := ArrayHeaderSize + uintptr(index)*uintptr(elementSize)
 
-	if dataOffset+uintptr(elementSize) > uintptr(len(a.data)) {
-		return fmt.Errorf("data offset out of bounds")
-	}
-
-	// Ensure we have enough space in the slice
+	// Ensure we have enough space in the slice - use consistent bounds checking
 	if int(dataOffset)+elementSize > len(a.data) {
-		return fmt.Errorf("insufficient data buffer size")
+		return fmt.Errorf("data offset out of bounds: offset=%d, elementSize=%d, dataLen=%d", 
+			dataOffset, elementSize, len(a.data))
 	}
 
-	dataPtr := a.data[dataOffset:]
+	// Get the slice starting from the correct offset with proper bounds
+	if int(dataOffset) >= len(a.data) {
+		return fmt.Errorf("data offset exceeds buffer: offset=%d, dataLen=%d", dataOffset, len(a.data))
+	}
+	
+	dataPtr := a.data[dataOffset:dataOffset+uintptr(elementSize)]
 
 	switch a.dataType {
 	case keys.TypeBool:
+		if len(dataPtr) < 1 {
+			return fmt.Errorf("insufficient buffer for bool")
+		}
 		if v, ok := value.(bool); ok {
 			if v {
 				dataPtr[0] = 1
