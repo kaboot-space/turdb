@@ -1186,4 +1186,38 @@ func (t *Table) GetCollectionColumns() []keys.ColKey {
 	return collections
 }
 
+// GetAllObjectKeys returns all object keys in the table
+func (t *Table) GetAllObjectKeys() ([]keys.ObjKey, error) {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+
+	if !t.isOpen {
+		return nil, fmt.Errorf("table is not open")
+	}
+
+	// Get root cluster
+	rootCluster, err := t.clusterTree.GetRootCluster()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get root cluster: %w", err)
+	}
+
+	// Get object count
+	objCount := rootCluster.ObjectCount()
+	if objCount == 0 {
+		return []keys.ObjKey{}, nil
+	}
+
+	// Collect all object keys
+	objKeys := make([]keys.ObjKey, 0, objCount)
+	for i := 0; i < objCount; i++ {
+		objKey, err := rootCluster.GetObjectKey(i)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get object key at index %d: %w", i, err)
+		}
+		objKeys = append(objKeys, objKey)
+	}
+
+	return objKeys, nil
+}
+
 // ... existing code ...
