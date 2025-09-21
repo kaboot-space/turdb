@@ -24,4 +24,9 @@ func TestAllFeatures(t *testing.T) {
 	t.Run("LinkTypes", TestLinkTypes)
 	t.Run("Validation", TestValidation)
 	t.Run("SchemaOperations", TestSchemaOperations)
+	
+	// MVCC and Transaction test suites
+	t.Run("TransactionCreation", TestTransactionCreation)
+	t.Run("IsolationLevels", TestIsolationLevels)
+	t.Run("ConcurrentReads", TestConcurrentReads)
 }
