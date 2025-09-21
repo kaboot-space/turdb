@@ -1,0 +1,8 @@
+.vscode
+.trae
+.claude
+bin/
+*.tur
+*.turdb
+*.md
+tur-dump
