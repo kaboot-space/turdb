@@ -167,6 +167,11 @@ func (t *Table) addColumnFromSpec(colSpec ColumnSpec) error {
 		colSpec.Key = keys.GenerateColKey(colSpec.Type, colSpec.Nullable)
 	}
 
+	// Validate column specification
+	if err := t.validateColumnSpec(&colSpec); err != nil {
+		return err
+	}
+
 	// Add to cluster tree
 	if err := t.clusterTree.AddColumn(colSpec.Key); err != nil {
 		return fmt.Errorf("failed to add column to cluster: %w", err)
@@ -228,12 +233,6 @@ func (t *Table) AddColumn(name string, dataType keys.DataType, nullable bool) (k
 	}
 	colKey := keys.ColKey(ref)
 
-	// Update modification timestamp
-	t.spec.Modified = time.Now().Unix()
-
-	// Store column mapping
-	t.columns[name] = colKey
-
 	// Create column specification
 	colSpec := &ColumnSpec{
 		Name:     name,
@@ -241,6 +240,17 @@ func (t *Table) AddColumn(name string, dataType keys.DataType, nullable bool) (k
 		Nullable: nullable,
 		Key:      colKey,
 	}
+
+	// Validate column specification
+	if err := t.validateColumnSpec(colSpec); err != nil {
+		return 0, err
+	}
+
+	// Update modification timestamp
+	t.spec.Modified = time.Now().UnixNano() / 1000000 // Convert to milliseconds
+
+	// Store column mapping
+	t.columns[name] = colKey
 	t.columnSpecs[colKey] = colSpec
 
 	// Add column to cluster tree
@@ -249,6 +259,9 @@ func (t *Table) AddColumn(name string, dataType keys.DataType, nullable bool) (k
 
 // RemoveColumn removes a column from the table
 func (t *Table) RemoveColumn(name string) error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	colKey, exists := t.columns[name]
 	if !exists {
 		return fmt.Errorf("column %s not found", name)
@@ -260,6 +273,9 @@ func (t *Table) RemoveColumn(name string) error {
 
 	delete(t.columns, name)
 	delete(t.columnSpecs, colKey)
+
+	// Update modification timestamp
+	t.spec.Modified = time.Now().Unix()
 
 	return nil
 }
@@ -456,7 +472,7 @@ func (t *Table) UpdateSpec(spec *TableSpec) error {
 	}
 
 	// Update modification timestamp
-	spec.Modified = time.Now().Unix()
+	spec.Modified = time.Now().UnixNano() / 1000000 // Convert to milliseconds
 
 	t.spec = spec
 	return nil
@@ -714,7 +730,8 @@ func (t *Table) UpdateSchemaHash() {
 	}
 
 	t.spec.SchemaHash = hash
-	t.spec.Modified = time.Now().Unix()
+	// Use nanosecond precision for more reliable timestamp updates
+	t.spec.Modified = time.Now().UnixNano() / 1000000 // Convert to milliseconds
 }
 
 // TableRef methods
@@ -834,6 +851,13 @@ func (t *Table) AddColumnList(name string, elementType keys.DataType, nullable b
 	// Generate new column key for list type
 	colKey := keys.GenerateColKey(keys.TypeList, nullable)
 
+	// Create column attributes with list flag
+	attrs := NewColumnAttributes(ColAttrList)
+	if nullable {
+		attrs.SetAttribute(ColAttrNullable)
+	}
+	attrs.SetElementType(elementType)
+
 	// Create column specification
 	colSpec := &ColumnSpec{
 		Name:        name,
@@ -842,6 +866,7 @@ func (t *Table) AddColumnList(name string, elementType keys.DataType, nullable b
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
+		Attributes:  attrs,
 	}
 
 	// Add to table
@@ -869,6 +894,13 @@ func (t *Table) AddColumnSet(name string, elementType keys.DataType, nullable bo
 	// Generate new column key for set type
 	colKey := keys.GenerateColKey(keys.TypeSet, nullable)
 
+	// Create column attributes with set flag
+	attrs := NewColumnAttributes(ColAttrSet)
+	if nullable {
+		attrs.SetAttribute(ColAttrNullable)
+	}
+	attrs.SetElementType(elementType)
+
 	// Create column specification
 	colSpec := &ColumnSpec{
 		Name:        name,
@@ -877,6 +909,7 @@ func (t *Table) AddColumnSet(name string, elementType keys.DataType, nullable bo
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
+		Attributes:  attrs,
 	}
 
 	// Add to table
@@ -904,6 +937,14 @@ func (t *Table) AddColumnDictionary(name string, keyType, valueType keys.DataTyp
 	// Generate new column key for dictionary type
 	colKey := keys.GenerateColKey(keys.TypeDict, nullable)
 
+	// Create column attributes with dictionary flag
+	attrs := NewColumnAttributes(ColAttrDict)
+	if nullable {
+		attrs.SetAttribute(ColAttrNullable)
+	}
+	attrs.SetElementType(valueType)
+	attrs.SetKeyType(keyType)
+
 	// Create column specification with both key and value types
 	colSpec := &ColumnSpec{
 		Name:        name,
@@ -913,6 +954,7 @@ func (t *Table) AddColumnDictionary(name string, keyType, valueType keys.DataTyp
 		Nullable:    nullable,
 		Indexed:     false,
 		Created:     time.Now().Unix(),
+		Attributes:  attrs,
 	}
 
 	// Add to table
@@ -1006,8 +1048,18 @@ func (t *Table) SetColumnAttribute(colKey keys.ColKey, attr ColumnAttrMask) erro
 		return fmt.Errorf("column with key %v not found", colKey)
 	}
 
+	// Check for primary key on nullable column before setting
+	if attr == ColAttrPrimaryKey && spec.Nullable {
+		return fmt.Errorf("primary key column cannot be nullable")
+	}
+
 	if spec.Attributes == nil {
-		spec.Attributes = NewColumnAttributes(ColAttrNone)
+		// Initialize attributes based on column's nullable property
+		if spec.Nullable {
+			spec.Attributes = NewColumnAttributes(ColAttrNullable)
+		} else {
+			spec.Attributes = NewColumnAttributes(ColAttrNone)
+		}
 	}
 
 	spec.Attributes.SetAttribute(attr)
@@ -1093,7 +1145,9 @@ func (t *Table) GetCollectionColumns() []keys.ColKey {
 
 	var collections []keys.ColKey
 	for colKey, spec := range t.columnSpecs {
-		if spec.Attributes != nil && spec.Attributes.IsCollection() {
+		// Check both attributes and data type for collection columns
+		if (spec.Attributes != nil && spec.Attributes.IsCollection()) ||
+			keys.IsCollectionType(spec.Type) {
 			collections = append(collections, colKey)
 		}
 	}

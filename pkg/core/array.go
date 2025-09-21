@@ -300,6 +300,11 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 		return fmt.Errorf("data offset out of bounds")
 	}
 
+	// Ensure we have enough space in the slice
+	if int(dataOffset)+elementSize > len(a.data) {
+		return fmt.Errorf("insufficient data buffer size")
+	}
+
 	dataPtr := a.data[dataOffset:]
 
 	switch a.dataType {
@@ -314,6 +319,9 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for bool array")
 		}
 	case keys.TypeInt:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for int64")
+		}
 		if v, ok := value.(int64); ok {
 			binary.LittleEndian.PutUint64(dataPtr, uint64(v))
 		} else if v, ok := value.(int); ok {
@@ -322,6 +330,9 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for int array")
 		}
 	case keys.TypeFloat:
+		if len(dataPtr) < 4 {
+			return fmt.Errorf("insufficient buffer for float32")
+		}
 		if v, ok := value.(float32); ok {
 			bits := *(*uint32)(unsafe.Pointer(&v))
 			binary.LittleEndian.PutUint32(dataPtr, bits)
@@ -329,6 +340,9 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for float array")
 		}
 	case keys.TypeDouble:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for float64")
+		}
 		if v, ok := value.(float64); ok {
 			bits := *(*uint64)(unsafe.Pointer(&v))
 			binary.LittleEndian.PutUint64(dataPtr, bits)
@@ -336,6 +350,9 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for double array")
 		}
 	case keys.TypeString:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for string reference")
+		}
 		if v, ok := value.(string); ok {
 			ref, err := a.storeString(v)
 			if err != nil {
@@ -346,12 +363,18 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for string array")
 		}
 	case keys.TypeLink:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for link")
+		}
 		if v, ok := value.(keys.ObjKey); ok {
 			binary.LittleEndian.PutUint64(dataPtr, uint64(v))
 		} else {
 			return fmt.Errorf("invalid type for link array")
 		}
 	case keys.TypeTypedLink:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for typed link")
+		}
 		if v, ok := value.(keys.TypedLink); ok {
 			// Encode TypedLink to bytes and store as string reference
 			encoded := v.Encode()
@@ -364,6 +387,9 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 			return fmt.Errorf("invalid type for typedlink array")
 		}
 	default:
+		if len(dataPtr) < 8 {
+			return fmt.Errorf("insufficient buffer for default type")
+		}
 		if v, ok := value.(uint64); ok {
 			binary.LittleEndian.PutUint64(dataPtr, v)
 		} else {
@@ -490,32 +516,73 @@ func (a *Array) grow() error {
 	return nil
 }
 
-// loadString loads a string from a reference (simplified)
+// loadString loads a string from a reference
 func (a *Array) loadString(ref RefType) (string, error) {
-	// Simplified string loading - in reality this would load from string table
-	data := a.allocator.GetData(ref, 256) // Max string length
-	if len(data) == 0 {
+	if ref == 0 {
+		return "", nil // Empty string for 0 ref
+	}
+
+	// Read length first (4 bytes)
+	lengthData := a.allocator.GetData(ref, 4)
+	if len(lengthData) < 4 {
+		return "", fmt.Errorf("insufficient data for string length")
+	}
+
+	// Decode length (little endian)
+	strLen := uint32(lengthData[0]) | 
+		(uint32(lengthData[1]) << 8) | 
+		(uint32(lengthData[2]) << 16) | 
+		(uint32(lengthData[3]) << 24)
+
+	if strLen == 0 {
 		return "", nil
 	}
 
-	// Find null terminator
-	for i, b := range data {
-		if b == 0 {
-			return string(data[:i]), nil
-		}
+	// Read the string data
+	totalSize := 4 + int(strLen)
+	data := a.allocator.GetData(ref, totalSize)
+	if len(data) < totalSize {
+		return "", fmt.Errorf("insufficient data for string content")
 	}
 
-	return string(data), nil
+	return string(data[4:4+strLen]), nil
 }
 
-// storeString stores a string and returns a reference (simplified)
+// storeString stores a string and returns a reference
 func (a *Array) storeString(s string) (RefType, error) {
-	// Simplified string storage - in reality this would use string table
-	data := append([]byte(s), 0) // Null terminated
-	ref, err := a.allocator.Alloc(uint32(len(data)))
+	if len(s) == 0 {
+		return 0, nil // Return 0 ref for empty strings
+	}
+	
+	// Store as: [length:4][data:length] (no null terminator needed)
+	strLen := uint32(len(s))
+	totalSize := 4 + strLen
+	
+	ref, err := a.allocator.Alloc(totalSize)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to allocate string space: %w", err)
 	}
 
-	return ref, a.allocator.WriteData(ref, data)
+	// Prepare data buffer: length (4 bytes) + string data
+	data := make([]byte, totalSize)
+	
+	// Write length (4 bytes, little endian)
+	data[0] = byte(strLen)
+	data[1] = byte(strLen >> 8)
+	data[2] = byte(strLen >> 16)
+	data[3] = byte(strLen >> 24)
+
+	// Write string data
+	if strLen > 0 {
+		copy(data[4:], []byte(s))
+	}
+
+	// Write to file
+	err = a.allocator.WriteData(ref, data)
+	if err != nil {
+		a.allocator.Free(ref, totalSize)
+		return 0, fmt.Errorf("failed to write string data: %w", err)
+	}
+
+	return ref, nil
 }
