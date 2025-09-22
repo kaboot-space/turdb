@@ -17,6 +17,8 @@ type QueryExecutor struct {
 	ordering   *DescriptorOrdering
 	sourceView *TableView
 	mutex      sync.RWMutex
+	nodePool   *NodePool
+	metrics    *MetricsCollector
 }
 
 // TableView represents a view of table objects matching query criteria
@@ -40,6 +42,8 @@ func NewQueryExecutor(tbl *table.Table) *QueryExecutor {
 	return &QueryExecutor{
 		table: tbl,
 		limit: ^uint64(0), // Max uint64, equivalent to size_t(-1) in C++
+		nodePool: GlobalNodePool,
+		metrics: GlobalMetricsCollector,
 	}
 }
 
