@@ -80,7 +80,13 @@ func (a *Array) Create(initialCapacity uint32) error {
 	// Get the allocated data first
 	a.data = a.allocator.GetData(ref, int(totalSize))
 	if a.data == nil {
-		return fmt.Errorf("failed to get allocated data")
+		// Debug information to understand why GetData failed
+		offset := a.allocator.fileFormat.RefToOffset(RefType(ref))
+		mapper := a.allocator.fileFormat.GetMapper()
+		mapperSize := mapper.Size()
+		mapperData := mapper.GetData()
+		return fmt.Errorf("failed to get allocated data: ref=%d, offset=%d, totalSize=%d, mapperSize=%d, mapperData=nil:%t",
+			ref, offset, totalSize, mapperSize, mapperData == nil)
 	}
 	if len(a.data) < int(totalSize) {
 		return fmt.Errorf("allocated data size mismatch: got %d, expected %d", len(a.data), totalSize)
@@ -293,12 +299,20 @@ func (a *Array) getValueAt(index uint32) (interface{}, error) {
 
 // setValueAt sets the raw value at the given index
 func (a *Array) setValueAt(index uint32, value interface{}) error {
+	// Check if array is properly initialized
+	if a.data == nil {
+		return fmt.Errorf("array data is not initialized")
+	}
+	if a.header == nil {
+		return fmt.Errorf("array header is not initialized")
+	}
+
 	elementSize := a.getElementSize()
 	dataOffset := ArrayHeaderSize + uintptr(index)*uintptr(elementSize)
 
 	// Ensure we have enough space in the slice - use consistent bounds checking
 	if int(dataOffset)+elementSize > len(a.data) {
-		return fmt.Errorf("data offset out of bounds: offset=%d, elementSize=%d, dataLen=%d", 
+		return fmt.Errorf("data offset out of bounds: offset=%d, elementSize=%d, dataLen=%d",
 			dataOffset, elementSize, len(a.data))
 	}
 
@@ -306,8 +320,8 @@ func (a *Array) setValueAt(index uint32, value interface{}) error {
 	if int(dataOffset) >= len(a.data) {
 		return fmt.Errorf("data offset exceeds buffer: offset=%d, dataLen=%d", dataOffset, len(a.data))
 	}
-	
-	dataPtr := a.data[dataOffset:dataOffset+uintptr(elementSize)]
+
+	dataPtr := a.data[dataOffset : dataOffset+uintptr(elementSize)]
 
 	switch a.dataType {
 	case keys.TypeBool:
@@ -534,9 +548,9 @@ func (a *Array) loadString(ref RefType) (string, error) {
 	}
 
 	// Decode length (little endian)
-	strLen := uint32(lengthData[0]) | 
-		(uint32(lengthData[1]) << 8) | 
-		(uint32(lengthData[2]) << 16) | 
+	strLen := uint32(lengthData[0]) |
+		(uint32(lengthData[1]) << 8) |
+		(uint32(lengthData[2]) << 16) |
 		(uint32(lengthData[3]) << 24)
 
 	if strLen == 0 {
@@ -550,7 +564,7 @@ func (a *Array) loadString(ref RefType) (string, error) {
 		return "", fmt.Errorf("insufficient data for string content")
 	}
 
-	return string(data[4:4+strLen]), nil
+	return string(data[4 : 4+strLen]), nil
 }
 
 // storeString stores a string and returns a reference
@@ -558,11 +572,11 @@ func (a *Array) storeString(s string) (RefType, error) {
 	if len(s) == 0 {
 		return 0, nil // Return 0 ref for empty strings
 	}
-	
+
 	// Store as: [length:4][data:length] (no null terminator needed)
 	strLen := uint32(len(s))
 	totalSize := 4 + strLen
-	
+
 	ref, err := a.allocator.Alloc(totalSize)
 	if err != nil {
 		return 0, fmt.Errorf("failed to allocate string space: %w", err)
@@ -570,7 +584,7 @@ func (a *Array) storeString(s string) (RefType, error) {
 
 	// Prepare data buffer: length (4 bytes) + string data
 	data := make([]byte, totalSize)
-	
+
 	// Write length (4 bytes, little endian)
 	data[0] = byte(strLen)
 	data[1] = byte(strLen >> 8)

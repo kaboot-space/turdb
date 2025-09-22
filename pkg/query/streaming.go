@@ -35,7 +35,7 @@ func NewResultStream(tree *cluster.ClusterTree, bufferSize int) *ResultStream {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	root, err := tree.GetRootCluster()
 	size := int64(0)
 	if err == nil && root != nil {
@@ -248,19 +248,19 @@ func (sq *StreamingQuery) WithFilter(filter func(keys.ObjKey) bool) *StreamingQu
 // Stream returns a filtered result stream
 func (sq *StreamingQuery) Stream(bufferSize int) *ResultStream {
 	stream := NewResultStream(sq.tree, bufferSize)
-	
+
 	if sq.filter != nil {
 		// Create a filtered stream
 		return sq.createFilteredStream(stream)
 	}
-	
+
 	return stream
 }
 
 // createFilteredStream creates a stream with filtering applied
 func (sq *StreamingQuery) createFilteredStream(originalStream *ResultStream) *ResultStream {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	filteredStream := &ResultStream{
 		tree:    sq.tree,
 		results: make(chan StreamingResult, originalStream.bufSize),
@@ -277,7 +277,7 @@ func (sq *StreamingQuery) createFilteredStream(originalStream *ResultStream) *Re
 		defer close(filteredStream.done)
 
 		originalResults := originalStream.Start()
-		
+
 		for result := range originalResults {
 			select {
 			case <-filteredStream.ctx.Done():

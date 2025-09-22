@@ -17,21 +17,21 @@ import (
 
 // QueryCompiler handles runtime code generation for hot queries
 type QueryCompiler struct {
-	compiledQueries map[string]*CompiledQuery
-	hitCounts       map[string]int
+	compiledQueries  map[string]*CompiledQuery
+	hitCounts        map[string]int
 	compileThreshold int
-	mutex           sync.RWMutex
+	mutex            sync.RWMutex
 }
 
 // CompiledQuery represents a compiled query with generated execution code
 type CompiledQuery struct {
-	ID           string
-	Expression   QueryExpression
+	ID            string
+	Expression    QueryExpression
 	GeneratedCode string
-	ExecuteFunc  func(*table.Table, keys.ObjKey) bool
-	CompileTime  time.Time
-	HitCount     int
-	LastUsed     time.Time
+	ExecuteFunc   func(*table.Table, keys.ObjKey) bool
+	CompileTime   time.Time
+	HitCount      int
+	LastUsed      time.Time
 }
 
 // CompilationStats tracks compilation performance metrics
@@ -62,12 +62,12 @@ func (qc *QueryCompiler) SetCompileThreshold(threshold int) {
 func (qc *QueryCompiler) ShouldCompile(queryID string) bool {
 	qc.mutex.RLock()
 	defer qc.mutex.RUnlock()
-	
+
 	count, exists := qc.hitCounts[queryID]
 	if !exists {
 		return false
 	}
-	
+
 	return count >= qc.compileThreshold
 }
 
@@ -75,28 +75,28 @@ func (qc *QueryCompiler) ShouldCompile(queryID string) bool {
 func (qc *QueryCompiler) GetOrCompile(queryID string, expr QueryExpression) (*CompiledQuery, error) {
 	qc.mutex.Lock()
 	defer qc.mutex.Unlock()
-	
+
 	// Increment hit count
 	qc.hitCounts[queryID]++
-	
+
 	// Check if already compiled
 	if compiled, exists := qc.compiledQueries[queryID]; exists {
 		compiled.HitCount++
 		compiled.LastUsed = time.Now()
 		return compiled, nil
 	}
-	
+
 	// Check if should compile
 	if qc.hitCounts[queryID] < qc.compileThreshold {
 		return nil, nil // Not ready for compilation
 	}
-	
+
 	// Compile the query
 	compiled, err := qc.compileQuery(queryID, expr)
 	if err != nil {
 		return nil, fmt.Errorf("compilation failed: %w", err)
 	}
-	
+
 	qc.compiledQueries[queryID] = compiled
 	return compiled, nil
 }
@@ -122,13 +122,13 @@ func (qc *QueryCompiler) compileQuery(queryID string, expr QueryExpression) (*Co
 	}
 
 	compiled := &CompiledQuery{
-		ID:           queryID,
-		Expression:   expr,
+		ID:            queryID,
+		Expression:    expr,
 		GeneratedCode: formattedCode,
-		ExecuteFunc:  executeFunc,
-		CompileTime:  time.Now(),
-		HitCount:     0,
-		LastUsed:     time.Now(),
+		ExecuteFunc:   executeFunc,
+		CompileTime:   time.Now(),
+		HitCount:      0,
+		LastUsed:      time.Now(),
 	}
 
 	return compiled, nil
@@ -225,12 +225,12 @@ func (qc *QueryCompiler) parseBasicLit(lit *ast.BasicLit) interface{} {
 func (qc *QueryCompiler) GetStats() CompilationStats {
 	qc.mutex.RLock()
 	defer qc.mutex.RUnlock()
-	
+
 	totalHits := 0
 	for _, compiled := range qc.compiledQueries {
 		totalHits += compiled.HitCount
 	}
-	
+
 	return CompilationStats{
 		TotalCompilations: len(qc.compiledQueries),
 		CacheHits:         totalHits,
@@ -242,7 +242,7 @@ func (qc *QueryCompiler) GetStats() CompilationStats {
 func (qc *QueryCompiler) ClearCache() {
 	qc.mutex.Lock()
 	defer qc.mutex.Unlock()
-	
+
 	qc.compiledQueries = make(map[string]*CompiledQuery)
 	qc.hitCounts = make(map[string]int)
 }
@@ -272,12 +272,12 @@ func (cg *CodeGenerator) generateComparisonCode(expr *ComparisonExpression) (str
 	if err != nil {
 		return "", err
 	}
-	
+
 	rightCode, err := cg.GenerateCode(expr.Right)
 	if err != nil {
 		return "", err
 	}
-	
+
 	var opCode string
 	switch expr.Operator {
 	case OpEqual:
@@ -295,7 +295,7 @@ func (cg *CodeGenerator) generateComparisonCode(expr *ComparisonExpression) (str
 	default:
 		return "", fmt.Errorf("unsupported comparison operator: %v", expr.Operator)
 	}
-	
+
 	return fmt.Sprintf("(%s %s %s)", leftCode, opCode, rightCode), nil
 }
 
@@ -305,12 +305,12 @@ func (cg *CodeGenerator) generateLogicalCode(expr *LogicalExpression) (string, e
 	if err != nil {
 		return "", err
 	}
-	
+
 	rightCode, err := cg.GenerateCode(expr.Right)
 	if err != nil {
 		return "", err
 	}
-	
+
 	var opCode string
 	switch expr.Operator {
 	case OpAnd:
@@ -320,7 +320,7 @@ func (cg *CodeGenerator) generateLogicalCode(expr *LogicalExpression) (string, e
 	default:
 		return "", fmt.Errorf("unsupported logical operator: %v", expr.Operator)
 	}
-	
+
 	return fmt.Sprintf("(%s %s %s)", leftCode, opCode, rightCode), nil
 }
 

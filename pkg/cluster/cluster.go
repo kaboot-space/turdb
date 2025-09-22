@@ -501,6 +501,12 @@ func (c *Cluster) InsertObject(objKey keys.ObjKey) error {
 	// Extend all column arrays to accommodate new object
 	for _, columnArray := range c.columns {
 		if columnArray != nil {
+			// Check if array needs initialization
+			if columnArray.array.Size() == 0 && columnArray.array.Capacity() == 0 {
+				if err := columnArray.array.Create(16); err != nil { // Initialize with capacity 16
+					return fmt.Errorf("failed to initialize column array: %w", err)
+				}
+			}
 			if err := columnArray.array.Add(nil); err != nil { // Add null placeholder
 				return err
 			}

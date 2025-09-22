@@ -235,5 +235,5 @@ func testTypedLinks() {
 	fmt.Printf("TypeString is link type: %v\n", keys.IsLinkType(keys.TypeString))
 	fmt.Printf("TypeList is collection type: %v\n", keys.IsCollectionType(keys.TypeList))
 	
-	fmt.Println("=== TypedLink tests completed ===\n")
+	fmt.Println("=== TypedLink tests completed ===")
 }

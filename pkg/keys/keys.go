@@ -149,6 +149,16 @@ func (ok ObjKey) IsUnresolved() bool {
 	return ok == 0
 }
 
+// Compare returns -1, 0, or 1 if ok is less than, equal to, or greater than other
+func (ok ObjKey) Compare(other ObjKey) int {
+	if ok < other {
+		return -1
+	} else if ok > other {
+		return 1
+	}
+	return 0
+}
+
 // TableKey methods
 
 // GetValue returns the raw value of the table key
