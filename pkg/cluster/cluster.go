@@ -500,8 +500,10 @@ func (c *Cluster) InsertObject(objKey keys.ObjKey) error {
 
 	// Extend all column arrays to accommodate new object
 	for _, columnArray := range c.columns {
-		if err := columnArray.array.Add(nil); err != nil { // Add null placeholder
-			return err
+		if columnArray != nil {
+			if err := columnArray.array.Add(nil); err != nil { // Add null placeholder
+				return err
+			}
 		}
 	}
 

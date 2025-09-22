@@ -11,12 +11,12 @@ import (
 
 // QueryExecutor represents the query execution engine
 type QueryExecutor struct {
-	table       *table.Table
-	expression  QueryExpression
-	limit       uint64
-	ordering    *DescriptorOrdering
-	sourceView  *TableView
-	mutex       sync.RWMutex
+	table      *table.Table
+	expression QueryExpression
+	limit      uint64
+	ordering   *DescriptorOrdering
+	sourceView *TableView
+	mutex      sync.RWMutex
 }
 
 // TableView represents a view of table objects matching query criteria
@@ -118,11 +118,11 @@ func (qe *QueryExecutor) FindFirst() (keys.ObjKey, error) {
 	if err != nil {
 		return keys.NewObjKey(0), err
 	}
-	
+
 	if view.Size() == 0 {
 		return keys.NewObjKey(0), fmt.Errorf("no objects found")
 	}
-	
+
 	return view.GetKey(0), nil
 }
 
@@ -153,7 +153,7 @@ func (qe *QueryExecutor) Count() (uint64, error) {
 			if err != nil {
 				continue
 			}
-			
+
 			if qe.evaluateExpression(qe.expression, obj, visitor) {
 				count++
 			}
@@ -176,18 +176,18 @@ func (qe *QueryExecutor) doFindAll(view *TableView, limit uint64) error {
 	}
 
 	count := uint64(0)
-	
+
 	// Get all actual object keys from the table
 	objKeys, err := qe.table.GetAllObjectKeys()
 	if err != nil {
 		return fmt.Errorf("failed to get object keys: %w", err)
 	}
-	
+
 	for _, objKey := range objKeys {
 		if count >= limit {
 			break
 		}
-		
+
 		if !qe.table.ObjectExists(objKey) {
 			continue
 		}
@@ -211,19 +211,19 @@ func (qe *QueryExecutor) doFindAll(view *TableView, limit uint64) error {
 // findAllObjects adds all objects to the view (no filtering)
 func (qe *QueryExecutor) findAllObjects(view *TableView, limit uint64) error {
 	count := uint64(0)
-	
+
 	// Get all actual object keys from the table
 	objKeys, err := qe.table.GetAllObjectKeys()
 	if err != nil {
 		return fmt.Errorf("failed to get object keys: %w", err)
 	}
-	
+
 	// Add all object keys to the view up to limit
 	for _, objKey := range objKeys {
 		if count >= limit {
 			break
 		}
-		
+
 		view.keyValues = append(view.keyValues, objKey)
 		count++
 	}
@@ -245,17 +245,17 @@ func (qe *QueryExecutor) Evaluate(table *table.Table, objKey keys.ObjKey) bool {
 	if qe.expression == nil {
 		return true
 	}
-	
+
 	obj, err := table.GetObject(objKey)
 	if err != nil {
 		return false
 	}
-	
+
 	visitor := &EvaluationVisitor{
 		table: table,
 		obj:   obj,
 	}
-	
+
 	return qe.evaluateExpression(qe.expression, obj, visitor)
 }
 
@@ -310,19 +310,19 @@ func (tv *TableView) DoSync() error {
 		// Re-execute the query to sync
 		tv.keyValues = tv.keyValues[:0]
 		tv.inSync = false
-		
+
 		err := tv.query.doFindAll(tv, tv.query.limit)
 		if err != nil {
 			return err
 		}
-		
+
 		if tv.query.ordering != nil {
 			err = tv.applyOrdering(tv.query.ordering)
 			if err != nil {
 				return err
 			}
 		}
-		
+
 		tv.inSync = true
 	}
 
@@ -345,7 +345,7 @@ func (tv *TableView) applyOrdering(ordering *DescriptorOrdering) error {
 	sort.Slice(tv.keyValues, func(i, j int) bool {
 		objI, errI := tv.table.GetObject(tv.keyValues[i])
 		objJ, errJ := tv.table.GetObject(tv.keyValues[j])
-		
+
 		if errI != nil || errJ != nil {
 			return false
 		}
@@ -354,7 +354,7 @@ func (tv *TableView) applyOrdering(ordering *DescriptorOrdering) error {
 		for idx, colKey := range ordering.columns {
 			valI, errI := objI.Get(colKey)
 			valJ, errJ := objJ.Get(colKey)
-			
+
 			if errI != nil || errJ != nil {
 				continue
 			}
@@ -367,7 +367,7 @@ func (tv *TableView) applyOrdering(ordering *DescriptorOrdering) error {
 				return cmp > 0
 			}
 		}
-		
+
 		return false
 	})
 
@@ -445,14 +445,14 @@ type EvaluationVisitor struct {
 func (ev *EvaluationVisitor) VisitComparison(expr *ComparisonExpression) interface{} {
 	leftVal := expr.Left.Accept(ev)
 	rightVal := expr.Right.Accept(ev)
-	
+
 	return evaluateComparison(leftVal, rightVal, expr.Operator)
 }
 
 // VisitLogical evaluates logical expressions
 func (ev *EvaluationVisitor) VisitLogical(expr *LogicalExpression) interface{} {
 	leftResult := expr.Left.Accept(ev)
-	
+
 	switch expr.Operator {
 	case OpAnd:
 		if !toBool(leftResult) {
@@ -469,7 +469,7 @@ func (ev *EvaluationVisitor) VisitLogical(expr *LogicalExpression) interface{} {
 	case OpNot:
 		return !toBool(leftResult)
 	}
-	
+
 	return false
 }
 
@@ -478,12 +478,12 @@ func (ev *EvaluationVisitor) VisitProperty(expr *PropertyExpression) interface{}
 	if ev.obj == nil {
 		return nil
 	}
-	
+
 	value, err := ev.obj.Get(expr.ColKey)
 	if err != nil {
 		return nil
 	}
-	
+
 	return value
 }
 

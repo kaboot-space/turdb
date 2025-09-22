@@ -6,3 +6,4 @@ bin/
 *.turdb
 *.md
 tur-dump
+.idea/

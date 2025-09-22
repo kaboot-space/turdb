@@ -299,6 +299,13 @@ func (t *Table) RemoveColumn(name string) error {
 // GetColumn returns the column key for a given column name
 func (t *Table) GetColumn(name string) (keys.ColKey, bool) {
 	colKey, exists := t.columns[name]
+	if exists {
+		// Ensure column is added to cluster tree
+		if err := t.clusterTree.AddColumn(colKey); err != nil {
+			// Log error but don't fail - column might already exist
+			// In a production system, this would be logged properly
+		}
+	}
 	return colKey, exists
 }
 
@@ -1184,6 +1191,19 @@ func (t *Table) GetCollectionColumns() []keys.ColKey {
 	}
 
 	return collections
+}
+
+// GetColumnType returns the data type for a column
+func (t *Table) GetColumnType(colKey keys.ColKey) (keys.DataType, error) {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+
+	spec, exists := t.columnSpecs[colKey]
+	if !exists {
+		return 0, fmt.Errorf("column with key %v not found", colKey)
+	}
+
+	return spec.Type, nil
 }
 
 // GetAllObjectKeys returns all object keys in the table
